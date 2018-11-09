@@ -25,3 +25,4 @@ executable aggr-haskell
                      , http-conduit
                      , text
                      , time
+                     , xml-conduit

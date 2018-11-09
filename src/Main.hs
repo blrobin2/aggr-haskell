@@ -30,12 +30,19 @@ getPitchforkAlbums :: IO [Album]
 getPitchforkAlbums = do
   cursor <- getXmlCursor "https://pitchfork.com/rss/reviews/albums/"
   let albumsAwaitingDate = toAlbumsAwaitingDate $ getArtistAndTitle cursor
-  let date = getReleaseDate cursor
+  let date   = getReleaseDate cursor
   let albums = zipWith addDateToAlbum albumsAwaitingDate date
-  scores <- getReviewScore cursor
-  let pairs = zip scores albums
-  let filtered = map snd $ filter (\(score, at) -> (read . T.unpack $ score :: Double) >= 8.0) pairs
-  return filtered
+  scores <- getReviewScores cursor
+  return $ filterAlbumsByScore scores albums
+
+filterAlbumsByScore :: [Text] -> [Album] -> [Album]
+filterAlbumsByScore scores albums = filtered
+  where
+    pairs :: [(Text, Album)]
+    pairs = zip scores albums
+    filtered :: [Album]
+    filtered = map snd $ filter scoreIsHighEnough pairs
+    scoreIsHighEnough (score, at) = (read . T.unpack $ score :: Double) >= 7.8
 
 getXmlCursor :: Request -> IO Cursor
 getXmlCursor url = do
@@ -50,24 +57,27 @@ getReleaseDate :: Cursor -> [Text]
 getReleaseDate cursor = map toDate dates
   where dates = cursor $// element "item" &/ element "pubDate" &// content
 
-getReviewScore :: Cursor -> IO [Text]
-getReviewScore cursor = do
-  let link = getReviewLink cursor
-  traverse score link
+getReviewScores :: Cursor -> IO [Text]
+getReviewScores = traverse score . getReviewLinks
   where
-    score l = do
-      request <- parseRequest l
-      reviewCursor <- getXmlCursor $ request
-      return $ T.concat $ reviewCursor $// element "span" >=> attributeIs "class" "score" &// content
+    score :: String -> IO Text
+    score link = parseRequest link >>= getXmlCursor >>= return . getScore
 
-getReviewLink :: Cursor -> [String]
-getReviewLink cursor = filtered
+getReviewLinks :: Cursor -> [String]
+getReviewLinks cursor = links
   where
-    elem = cursor $// element "item" &// content
-    filtered = filter isLink (map T.unpack elem)
+    -- for some reason, element "link" does not work, so we have to do this
+    elems = cursor $// element "item" &// content
+    links = filter isLink (map T.unpack elems)
+
+getScore :: Cursor -> Text
+getScore cursor = T.concat score
+  where
+    score =
+      cursor $// element "span" >=> attributeIs "class" "score" &// content
 
 isLink :: String -> Bool
-isLink str = str!!0 == 'h' && str!!1 == 't' && str!!2 == 't' && str!!3 == 'p'
+isLink (h:t1:t2:p:_) = h == 'h' && t1 == 't' && t2 == 't' && p == 'p'
 
 toAlbumsAwaitingDate :: [Text] -> [(Date -> Album)]
 toAlbumsAwaitingDate = map (toAlbumAwaitingDate . map T.strip . T.splitOn ":")
