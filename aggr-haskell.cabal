@@ -20,8 +20,8 @@ executable aggr-haskell
   build-depends:       base >= 4.7 && < 5
                      , aeson
                      , bytestring
+                     , html-conduit
                      , http-client
                      , http-conduit
                      , text
                      , time
-                     , xml-conduit
