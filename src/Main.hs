@@ -34,7 +34,7 @@ getPitchforkAlbums = do
   let albums = zipWith addDateToAlbum albumsAwaitingDate date
   scores <- getReviewScore cursor
   let pairs = zip scores albums
-  let filtered = map snd $ filter (\(score, at) -> (read . T.unpack $ score :: Double) > 8.0) pairs
+  let filtered = map snd $ filter (\(score, at) -> (read . T.unpack $ score :: Double) >= 8.0) pairs
   return filtered
 
 getXmlCursor :: Request -> IO Cursor
@@ -58,7 +58,7 @@ getReviewScore cursor = do
     score l = do
       request <- parseRequest l
       reviewCursor <- getXmlCursor $ request
-      return $ T.concat $ reviewCursor $// element "span" >=> attributeIs "class" "score" &//content
+      return $ T.concat $ reviewCursor $// element "span" >=> attributeIs "class" "score" &// content
 
 getReviewLink :: Cursor -> [String]
 getReviewLink cursor = filtered
