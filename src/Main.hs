@@ -42,7 +42,10 @@ filterAlbumsByScore scores albums = filtered
     pairs = zip scores albums
     filtered :: [Album]
     filtered = map snd $ filter scoreIsHighEnough pairs
-    scoreIsHighEnough (score, at) = (read . T.unpack $ score :: Double) >= 7.8
+    scoreIsHighEnough :: (Text, Album) -> Bool
+    scoreIsHighEnough (score, _) = parseScore score >= 7.8
+    parseScore :: Text -> Double
+    parseScore = read . T.unpack
 
 getXmlCursor :: Request -> IO Cursor
 getXmlCursor url = do
@@ -61,7 +64,7 @@ getReviewScores :: Cursor -> IO [Text]
 getReviewScores = traverse score . getReviewLinks
   where
     score :: String -> IO Text
-    score link = parseRequest link >>= getXmlCursor >>= return . getScore
+    score link = getScore <$> (parseRequest link >>= getXmlCursor)
 
 getReviewLinks :: Cursor -> [String]
 getReviewLinks cursor = links
@@ -79,25 +82,25 @@ getScore cursor = T.concat score
 isLink :: String -> Bool
 isLink (h:t1:t2:p:_) = h == 'h' && t1 == 't' && t2 == 't' && p == 'p'
 
-toAlbumsAwaitingDate :: [Text] -> [(Date -> Album)]
+toAlbumsAwaitingDate :: [Text] -> [Date -> Album]
 toAlbumsAwaitingDate = map (toAlbumAwaitingDate . map T.strip . T.splitOn ":")
 
 toAlbumAwaitingDate :: [Text] -> (Date -> Album)
 toAlbumAwaitingDate [a, t]       = Album a t
 toAlbumAwaitingDate [a]          = Album a ""
-toAlbumAwaitingDate (a:t1:t2:[]) = Album a (t1 <> ": " <> t2)
+toAlbumAwaitingDate [a,t1,t2]    = Album a (t1 <> ": " <> t2)
 toAlbumAwaitingDate _            = error "Invalid pattern!"
 
 addDateToAlbum :: (Date -> Album) -> Date -> Album
-addDateToAlbum a d = a d
-
-toUCTTime :: String -> Maybe UTCTime
-toUCTTime = parseTimeM True defaultTimeLocale "%a, %d %b %Y %X %z"
+addDateToAlbum a = a
 
 toDate :: Text -> Date
 toDate d = case toUCTTime (T.unpack d) of
   Nothing  -> ""
   Just d'  -> T.pack $ formatTime defaultTimeLocale "%b %d %Y" d'
+
+toUCTTime :: String -> Maybe UTCTime
+toUCTTime = parseTimeM True defaultTimeLocale "%a, %d %b %Y %X %z"
 
 main :: IO ()
 main = do
