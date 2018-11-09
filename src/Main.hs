@@ -63,15 +63,15 @@ getReleaseDate cursor = map toDate dates
 getReviewScores :: Cursor -> IO [Text]
 getReviewScores = traverse score . getReviewLinks
   where
-    score :: String -> IO Text
-    score link = getScore <$> (parseRequest link >>= getXmlCursor)
+    score :: Text -> IO Text
+    score link = getScore <$> (parseRequest (T.unpack link) >>= getXmlCursor)
 
-getReviewLinks :: Cursor -> [String]
+getReviewLinks :: Cursor -> [Text]
 getReviewLinks cursor = links
   where
     -- for some reason, element "link" does not work, so we have to do this
     elems = cursor $// element "item" &// content
-    links = filter isLink (map T.unpack elems)
+    links = filter (T.isPrefixOf "http") elems
 
 getScore :: Cursor -> Text
 getScore cursor = T.concat score
@@ -79,17 +79,14 @@ getScore cursor = T.concat score
     score =
       cursor $// element "span" >=> attributeIs "class" "score" &// content
 
-isLink :: String -> Bool
-isLink (h:t1:t2:p:_) = h == 'h' && t1 == 't' && t2 == 't' && p == 'p'
-
 toAlbumsAwaitingDate :: [Text] -> [Date -> Album]
 toAlbumsAwaitingDate = map (toAlbumAwaitingDate . map T.strip . T.splitOn ":")
 
 toAlbumAwaitingDate :: [Text] -> (Date -> Album)
-toAlbumAwaitingDate [a, t]       = Album a t
-toAlbumAwaitingDate [a]          = Album a ""
-toAlbumAwaitingDate [a,t1,t2]    = Album a (t1 <> ": " <> t2)
-toAlbumAwaitingDate _            = error "Invalid pattern!"
+toAlbumAwaitingDate [a, t]    = Album a t
+toAlbumAwaitingDate [a]       = Album a ""
+toAlbumAwaitingDate [a,t1,t2] = Album a (t1 <> ": " <> t2)
+toAlbumAwaitingDate _         = error "Invalid pattern!"
 
 addDateToAlbum :: (Date -> Album) -> Date -> Album
 addDateToAlbum a = a
