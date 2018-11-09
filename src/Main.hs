@@ -2,16 +2,15 @@
 {-# LANGUAGE OverloadedStrings #-}
 module Main where
 
-import           Data.Aeson
-import qualified Data.ByteString.Lazy.Char8 as L8
+import           Data.Aeson (ToJSON, defaultOptions, encodeFile, genericToEncoding, toEncoding)
 import           Data.Text (Text)
 import qualified Data.Text as T
 import           Data.Time (UTCTime, parseTimeM)
-import           Data.Time.Format
-import           GHC.Generics
-import           Network.HTTP.Simple
-import           Text.XML
-import           Text.XML.Cursor
+import           Data.Time.Format (formatTime, defaultTimeLocale)
+import           GHC.Generics (Generic)
+import           Network.HTTP.Simple (Request, httpLBS, getResponseBody)
+import           Text.XML (def, parseLBS_)
+import           Text.XML.Cursor (Cursor, content, element, fromDocument, ($/), ($//), (&/), (&//))
 
 data Album
   = Album
@@ -23,11 +22,35 @@ data Album
 instance ToJSON Album where
   toEncoding = genericToEncoding defaultOptions
 
+getPitchforkAlbums :: IO [Album]
+getPitchforkAlbums = do
+  cursor <- getXmlCursor "https://pitchfork.com/rss/reviews/albums/"
+  let albumsAwaitingDate = toAlbumAwaitingDate $ geArtistAndTitle cursor
+  let date = getReleaseDate cursor
+  return $ zipWith withDate albumsAwaitingDate date
+
+getXmlCursor :: Request -> IO Cursor
+getXmlCursor url = do
+  response <- httpLBS url
+  let xmlDocument = parseLBS_ def (getResponseBody response)
+  return $ fromDocument xmlDocument
+
+geArtistAndTitle :: Cursor -> [Text]
+geArtistAndTitle cursor =
+  cursor $// element "item" &/ element "title" &// content
+
+getReleaseDate :: Cursor -> [Text]
+getReleaseDate cursor = map toDate dates
+  where dates = cursor $// element "item" &/ element "pubDate" &// content
+
+toAlbumAwaitingDate :: [Text] -> [(Text -> Album)]
+toAlbumAwaitingDate = map (toAlbum . map T.strip . T.splitOn ":")
+
 toAlbum :: [Text] -> (Text -> Album)
 toAlbum [a, t]       = Album a t
 toAlbum [a]          = Album a ""
 toAlbum (a:t1:t2:[]) = Album a (t1 <> ": " <> t2)
-toAlbum _            = error "What?"
+toAlbum _            = error "Invalid pattern!"
 
 withDate :: (Text -> Album) -> Text -> Album
 withDate a d = a d
@@ -37,17 +60,10 @@ toUCTTime = parseTimeM True defaultTimeLocale "%a, %d %b %Y %X %z"
 
 toDate :: Text -> Text
 toDate d = case toUCTTime (T.unpack d) of
-  Nothing -> ""
+  Nothing  -> ""
   Just d'  -> T.pack $ formatTime defaultTimeLocale "%b %d %Y" d'
 
 main :: IO ()
 main = do
-  response <- httpLBS "https://pitchfork.com/rss/reviews/albums/"
-  let document = parseLBS_ def (getResponseBody response)
-  let cursor   = fromDocument document
-  let albumArtist = cursor $// element "item" &/ element "title" &// content
-  let date        = map toDate $ cursor $// element "item" &/ element "pubDate" &// content
-  let albumsAwaitingDate = map (toAlbum . map (T.strip) . T.splitOn ":") albumArtist
-
-  let albums = zipWith withDate albumsAwaitingDate date
+  albums <- getPitchforkAlbums
   encodeFile "albums.json" albums
