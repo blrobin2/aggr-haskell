@@ -25,9 +25,9 @@ instance ToJSON Album where
 getPitchforkAlbums :: IO [Album]
 getPitchforkAlbums = do
   cursor <- getXmlCursor "https://pitchfork.com/rss/reviews/albums/"
-  let albumsAwaitingDate = toAlbumAwaitingDate $ geArtistAndTitle cursor
+  let albumsAwaitingDate = toAlbumsAwaitingDate $ geArtistAndTitle cursor
   let date = getReleaseDate cursor
-  return $ zipWith withDate albumsAwaitingDate date
+  return $ zipWith addDateToAlbum albumsAwaitingDate date
 
 getXmlCursor :: Request -> IO Cursor
 getXmlCursor url = do
@@ -43,17 +43,17 @@ getReleaseDate :: Cursor -> [Text]
 getReleaseDate cursor = map toDate dates
   where dates = cursor $// element "item" &/ element "pubDate" &// content
 
-toAlbumAwaitingDate :: [Text] -> [(Text -> Album)]
-toAlbumAwaitingDate = map (toAlbum . map T.strip . T.splitOn ":")
+toAlbumsAwaitingDate :: [Text] -> [(Text -> Album)]
+toAlbumsAwaitingDate = map (toAlbumAwaitingDate . map T.strip . T.splitOn ":")
 
-toAlbum :: [Text] -> (Text -> Album)
-toAlbum [a, t]       = Album a t
-toAlbum [a]          = Album a ""
-toAlbum (a:t1:t2:[]) = Album a (t1 <> ": " <> t2)
-toAlbum _            = error "Invalid pattern!"
+toAlbumAwaitingDate :: [Text] -> (Text -> Album)
+toAlbumAwaitingDate [a, t]       = Album a t
+toAlbumAwaitingDate [a]          = Album a ""
+toAlbumAwaitingDate (a:t1:t2:[]) = Album a (t1 <> ": " <> t2)
+toAlbumAwaitingDate _            = error "Invalid pattern!"
 
-withDate :: (Text -> Album) -> Text -> Album
-withDate a d = a d
+addDateToAlbum :: (Text -> Album) -> Text -> Album
+addDateToAlbum a d = a d
 
 toUCTTime :: String -> Maybe UTCTime
 toUCTTime = parseTimeM True defaultTimeLocale "%a, %d %b %Y %X %z"
