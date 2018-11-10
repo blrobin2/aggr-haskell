@@ -36,10 +36,17 @@ data Album
 instance ToJSON Album where
   toEncoding = genericToEncoding defaultOptions
 
+getStereogumAlbums :: IO [Album]
+getStereogumAlbums = do
+  cursor <- getXmlCursor "https://www.stereogum.com/heavy-rotation/feed/"
+  let albumsAwaitingDate = toAlbumsAwaitingDate "–" $ getArtistsAndTitles cursor
+  let dates = getReleaseDates cursor
+  return $ zipWith (\album date -> album date) albumsAwaitingDate dates
+
 getPitchforkAlbums :: IO [Album]
 getPitchforkAlbums = do
   cursor <- getXmlCursor "https://pitchfork.com/rss/reviews/albums/"
-  let albumsAwaitingDate = toAlbumsAwaitingDate $ getArtistsAndTitles cursor
+  let albumsAwaitingDate = toAlbumsAwaitingDate ":" $ getArtistsAndTitles cursor
   let dates  = getReleaseDates cursor
   let albums = zipWith (\album date -> album date) albumsAwaitingDate dates
   scores <- getReviewScores cursor
@@ -89,8 +96,8 @@ getScore cursor = T.concat score
     score =
       cursor $// element "span" >=> attributeIs "class" "score" &// content
 
-toAlbumsAwaitingDate :: [Text] -> [Date -> Album]
-toAlbumsAwaitingDate = map (toAlbumAwaitingDate . map T.strip . T.splitOn ":")
+toAlbumsAwaitingDate :: Text -> [Text] -> [Date -> Album]
+toAlbumsAwaitingDate splitter = map (toAlbumAwaitingDate . map T.strip . T.splitOn splitter)
 
 toAlbumAwaitingDate :: [Text] -> (Date -> Album)
 toAlbumAwaitingDate [a, t]    = Album a t
@@ -108,5 +115,6 @@ toUCTTime = parseTimeM True defaultTimeLocale "%a, %d %b %Y %X %z"
 
 main :: IO ()
 main = do
-  albums <- getPitchforkAlbums
-  encodeFile "albums.json" albums
+  pitchfork <- getPitchforkAlbums
+  stereogum <- getStereogumAlbums
+  encodeFile "albums.json" stereogum
