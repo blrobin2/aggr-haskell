@@ -19,6 +19,7 @@ executable aggr-haskell
   default-language:    Haskell2010
   build-depends:       base >= 4.7 && < 5
                      , aeson
+                     , async
                      , bytestring
                      , html-conduit
                      , http-client

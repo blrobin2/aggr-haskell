@@ -3,14 +3,23 @@
 module Main where
 
 import           Control.Monad ((>=>))
-import           Data.Aeson (ToJSON, defaultOptions, encodeFile, genericToEncoding, toEncoding)
+import           Data.Aeson (ToJSON
+                            , defaultOptions
+                            , encodeFile
+                            , genericToEncoding
+                            , toEncoding
+                            )
 import           Data.Text (Text)
 import qualified Data.Text as T
 import           Data.Time (UTCTime, parseTimeM)
 import           Data.Time.Format (formatTime, defaultTimeLocale)
 import           GHC.Generics (Generic)
 import           Network.HTTP.Client (parseRequest)
-import           Network.HTTP.Simple (Request, httpLBS, httpSink, getResponseBody)
+import           Network.HTTP.Simple (Request
+                                     , httpLBS
+                                     , httpSink
+                                     , getResponseBody
+                                     )
 import           Text.HTML.DOM
 import           Text.XML.Cursor
 
@@ -29,9 +38,9 @@ instance ToJSON Album where
 getPitchforkAlbums :: IO [Album]
 getPitchforkAlbums = do
   cursor <- getXmlCursor "https://pitchfork.com/rss/reviews/albums/"
-  let albumsAwaitingDate = toAlbumsAwaitingDate $ getArtistAndTitle cursor
-  let date   = getReleaseDate cursor
-  let albums = zipWith addDateToAlbum albumsAwaitingDate date
+  let albumsAwaitingDate = toAlbumsAwaitingDate $ getArtistsAndTitles cursor
+  let dates  = getReleaseDates cursor
+  let albums = zipWith (\album date -> album date) albumsAwaitingDate dates
   scores <- getReviewScores cursor
   return $ filterAlbumsByScore scores albums
 
@@ -43,23 +52,24 @@ filterAlbumsByScore scores albums = filtered
     filtered :: [Album]
     filtered = map snd $ filter scoreIsHighEnough pairs
     scoreIsHighEnough :: (Text, Album) -> Bool
-    scoreIsHighEnough (score, _) = parseScore score >= 7.8
-    parseScore :: Text -> Double
-    parseScore = read . T.unpack
+    scoreIsHighEnough (score, _) = readScore score >= 7.8
+    readScore :: Text -> Double
+    readScore = read . T.unpack
 
 getXmlCursor :: Request -> IO Cursor
 getXmlCursor url = do
   doc <- httpSink url $ const sinkDoc
   return $ fromDocument doc
 
-getArtistAndTitle :: Cursor -> [Text]
-getArtistAndTitle cursor =
+getArtistsAndTitles :: Cursor -> [Text]
+getArtistsAndTitles cursor =
   cursor $// element "item" &/ element "title" &// content
 
-getReleaseDate :: Cursor -> [Text]
-getReleaseDate cursor = map toDate dates
+getReleaseDates :: Cursor -> [Text]
+getReleaseDates cursor = map toDate dates
   where dates = cursor $// element "item" &/ element "pubDate" &// content
 
+-- TODO: figure out how to make all these calls in parallel
 getReviewScores :: Cursor -> IO [Text]
 getReviewScores = traverse score . getReviewLinks
   where
@@ -87,9 +97,6 @@ toAlbumAwaitingDate [a, t]    = Album a t
 toAlbumAwaitingDate [a]       = Album a ""
 toAlbumAwaitingDate [a,t1,t2] = Album a (t1 <> ": " <> t2)
 toAlbumAwaitingDate _         = error "Invalid pattern!"
-
-addDateToAlbum :: (Date -> Album) -> Date -> Album
-addDateToAlbum a = a
 
 toDate :: Text -> Date
 toDate d = case toUCTTime (T.unpack d) of
