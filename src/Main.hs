@@ -3,6 +3,7 @@
 module Main where
 
 import           Control.Monad ((>=>))
+import           Control.Concurrent.Async (mapConcurrently)
 import           Data.Aeson (ToJSON
                             , defaultOptions
                             , encodeFile
@@ -69,9 +70,8 @@ getReleaseDates :: Cursor -> [Text]
 getReleaseDates cursor = map toDate dates
   where dates = cursor $// element "item" &/ element "pubDate" &// content
 
--- TODO: figure out how to make all these calls in parallel
 getReviewScores :: Cursor -> IO [Text]
-getReviewScores = traverse score . getReviewLinks
+getReviewScores = mapConcurrently score . getReviewLinks
   where
     score :: Text -> IO Text
     score link = getScore <$> (parseRequest (T.unpack link) >>= getXmlCursor)
