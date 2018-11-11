@@ -2,7 +2,7 @@
 {-# LANGUAGE OverloadedStrings #-}
 module Main where
 
-import           Control.Monad ((>=>))
+import           Control.Monad ((>=>), join)
 import           Control.Concurrent.Async (mapConcurrently)
 import           Data.Aeson (ToJSON
                             , defaultOptions
@@ -10,6 +10,7 @@ import           Data.Aeson (ToJSON
                             , genericToEncoding
                             , toEncoding
                             )
+import           Data.List (nub)
 import           Data.Text (Text)
 import qualified Data.Text as T
 import           Data.Time (UTCTime, parseTimeM)
@@ -25,7 +26,7 @@ import           Text.HTML.DOM
 import           Text.XML.Cursor
 
 type Date = Text
-
+-- TODO: store dates here, and then do the formatting in the the ToJSON instance
 data Album
   = Album
   { artist :: Text
@@ -50,17 +51,55 @@ getPitchforkAlbums = do
   let dates  = getReleaseDates cursor
   let albums = zipWith (\album date -> album date) albumsAwaitingDate dates
   scores <- getReviewScores cursor
-  return $ filterAlbumsByScore scores albums
+  return $ filterAlbumsByScore 7.8 scores albums
 
-filterAlbumsByScore :: [Text] -> [Album] -> [Album]
-filterAlbumsByScore scores albums = filtered
+getMetacriticAlbums :: IO [Album]
+getMetacriticAlbums = do
+  cursor <- getXmlCursor "https://www.metacritic.com/browse/albums/release-date/new-releases/date"
+  let scores = cursor $//
+        element "li" >=> attributeIs "class" "product release_product"
+        &/ element "div"
+        &/ element "div" >=> attributeIs "class" "basic_stat product_score brief_metascore"
+        &/ element "div"
+        &// content
+  let dates = cursor $//
+        element "li" >=> attributeIs "class" "product release_product"
+        &/ element "div"
+        &/ element "div" >=> attributeIs "class" "basic_stat condensed_stats"
+        &/ element "ul"
+        &/ element "li" >=> attributeIs "class" "stat release_date"
+        &/ element "span" >=> attributeIs "class" "data"
+        &// content
+  let titles = map T.strip $ cursor $//
+        element "li" >=> attributeIs "class" "product release_product"
+        &/ element "div"
+        &/ element "div" >=> attributeIs "class" "basic_stat product_title"
+        &/ element "a"
+        &// content
+  let artists = cursor $//
+        element "li" >=> attributeIs "class" "product release_product"
+        &/ element "div"
+        &/ element "div" >=> attributeIs "class" "basic_stat condensed_stats"
+        &/ element "ul"
+        &/ element "li" >=> attributeIs "class" "stat product_artist"
+        &/ element "span" >=> attributeIs "class" "data"
+        &// content
+  let albums = zipWith3 Album artists titles dates
+  return $ filterAlbumsByScore 80 scores albums
+  where
+    formatDates d = case (parseTimeM True defaultTimeLocale "%b %d" (T.unpack d) :: Maybe UTCTime) of
+      Nothing  -> ""
+      Just d'  -> T.pack $ formatTime defaultTimeLocale "%b %d" d'
+
+filterAlbumsByScore :: Double -> [Text] -> [Album] -> [Album]
+filterAlbumsByScore lowestScore scores albums = filtered
   where
     pairs :: [(Text, Album)]
     pairs = zip scores albums
     filtered :: [Album]
     filtered = map snd $ filter scoreIsHighEnough pairs
     scoreIsHighEnough :: (Text, Album) -> Bool
-    scoreIsHighEnough (score, _) = readScore score >= 7.8
+    scoreIsHighEnough (score, _) = readScore score >= lowestScore
     readScore :: Text -> Double
     readScore = read . T.unpack
 
@@ -97,7 +136,8 @@ getScore cursor = T.concat score
       cursor $// element "span" >=> attributeIs "class" "score" &// content
 
 toAlbumsAwaitingDate :: Text -> [Text] -> [Date -> Album]
-toAlbumsAwaitingDate splitter = map (toAlbumAwaitingDate . map T.strip . T.splitOn splitter)
+toAlbumsAwaitingDate splitter =
+  map (toAlbumAwaitingDate . map T.strip . T.splitOn splitter)
 
 toAlbumAwaitingDate :: [Text] -> (Date -> Album)
 toAlbumAwaitingDate [a, t]    = Album a t
@@ -108,13 +148,13 @@ toAlbumAwaitingDate _         = error "Invalid pattern!"
 toDate :: Text -> Date
 toDate d = case toUCTTime (T.unpack d) of
   Nothing  -> ""
-  Just d'  -> T.pack $ formatTime defaultTimeLocale "%b %d %Y" d'
+  Just d'  -> T.pack $ formatTime defaultTimeLocale "%b %d" d'
 
 toUCTTime :: String -> Maybe UTCTime
 toUCTTime = parseTimeM True defaultTimeLocale "%a, %d %b %Y %X %z"
 
 main :: IO ()
 main = do
-  pitchfork <- getPitchforkAlbums
-  stereogum <- getStereogumAlbums
-  encodeFile "albums.json" stereogum
+  -- get only for this month and sort by date, then title
+  albums <- nub . join <$> mapConcurrently id [getPitchforkAlbums, getStereogumAlbums, getMetacriticAlbums]
+  encodeFile "albums.json" albums
