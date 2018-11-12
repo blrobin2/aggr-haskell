@@ -1,19 +1,15 @@
+{-# LANGUAGE DeriveAnyClass #-}
 {-# LANGUAGE DeriveGeneric #-}
 {-# LANGUAGE OverloadedStrings #-}
 module Main where
 
 import           Control.Monad ((>=>), join)
 import           Control.Concurrent.Async (mapConcurrently)
-import           Data.Aeson (ToJSON
-                            , defaultOptions
-                            , encodeFile
-                            , genericToEncoding
-                            , toEncoding
-                            )
+import           Data.Aeson (ToJSON(..), encodeFile)
 import           Data.List (nub, sort)
 import           Data.Text (Text)
 import qualified Data.Text as T
-import           Data.Time (UTCTime, parseTimeM)
+import           Data.Time (Day, parseTimeM)
 import           Data.Time.Format (formatTime, defaultTimeLocale)
 import           GHC.Generics (Generic)
 import           Network.HTTP.Client (parseRequest)
@@ -25,20 +21,15 @@ import           Network.HTTP.Simple (Request
 import           Text.HTML.DOM
 import           Text.XML.Cursor
 
-type Date = Text
--- TODO: store dates here, and then do the formatting in the the ToJSON instance
 data Album
   = Album
   { artist :: Text
   , title  :: Text
-  , date   :: Date
-  } deriving (Generic, Eq, Show)
+  , date   :: Day
+  } deriving (Generic, ToJSON, Eq, Show)
 
 instance Ord Album where
   compare (Album a1 _ d1) (Album a2 _ d2) = compare d2 d1 <> compare a1 a2
-
-instance ToJSON Album where
-  toEncoding = genericToEncoding defaultOptions
 
 getStereogumAlbums :: IO [Album]
 getStereogumAlbums = do
@@ -78,7 +69,7 @@ getMetacriticAlbums = do
         &/ element "div" >=> attributeIs "class" "basic_stat product_title"
         &/ element "a"
         &// content
-    getDates cursor = cursor $//
+    getDates cursor = map toDate $ cursor $//
         element "li" >=> attributeIs "class" "product release_product"
         &/ element "div"
         &/ element "div" >=> attributeIs "class" "basic_stat condensed_stats"
@@ -86,6 +77,8 @@ getMetacriticAlbums = do
         &/ element "li" >=> attributeIs "class" "stat release_date"
         &/ element "span" >=> attributeIs "class" "data"
         &// content
+    toDate d = case parseTimeM True defaultTimeLocale "%b %e" (T.unpack d) of
+      Right d' -> d'
     getScores cursor = cursor $//
         element "li" >=> attributeIs "class" "product release_product"
         &/ element "div"
@@ -114,7 +107,7 @@ getArtistsAndTitles :: Cursor -> [Text]
 getArtistsAndTitles cursor =
   cursor $// element "item" &/ element "title" &// content
 
-getReleaseDates :: Cursor -> [Text]
+getReleaseDates :: Cursor -> [Day]
 getReleaseDates cursor = map toDate dates
   where dates = cursor $// element "item" &/ element "pubDate" &// content
 
@@ -137,23 +130,25 @@ getScore cursor = T.concat score
     score =
       cursor $// element "span" >=> attributeIs "class" "score" &// content
 
-toAlbumsAwaitingDate :: Text -> [Text] -> [Date -> Album]
+toAlbumsAwaitingDate :: Text -> [Text] -> [Day -> Album]
 toAlbumsAwaitingDate splitter =
   map (toAlbumAwaitingDate splitter . map T.strip . T.splitOn splitter)
 
-toAlbumAwaitingDate :: Text -> [Text] -> (Date -> Album)
+toAlbumAwaitingDate :: Text -> [Text] -> (Day -> Album)
 toAlbumAwaitingDate _ [a, t]    = Album a t
 toAlbumAwaitingDate _ [a]       = Album a ""
 toAlbumAwaitingDate splitter [a,t1,t2] = Album a (t1 <> splitter <> t2)
 toAlbumAwaitingDate _ _         = error "Invalid pattern!"
 
-toDate :: Text -> Date
-toDate d = case toUCTTime (T.unpack d) of
-  Nothing  -> ""
-  Just d'  -> T.pack $ formatTime defaultTimeLocale "%b %d" d'
+dateToText :: Day -> Text
+dateToText = T.pack . formatTime defaultTimeLocale "%b %d"
 
-toUCTTime :: String -> Maybe UTCTime
-toUCTTime = parseTimeM True defaultTimeLocale "%a, %d %b %Y %X %z"
+toDate :: Text -> Day
+toDate d = case toDay (T.unpack d) of
+  Just d' -> d'
+
+toDay :: String -> Maybe Day
+toDay = parseTimeM True defaultTimeLocale "%a, %d %b %Y %X %z"
 
 main :: IO ()
 main = do
