@@ -10,7 +10,7 @@ import           Data.Aeson (ToJSON
                             , genericToEncoding
                             , toEncoding
                             )
-import           Data.List (nub)
+import           Data.List (nub, sort)
 import           Data.Text (Text)
 import qualified Data.Text as T
 import           Data.Time (UTCTime, parseTimeM)
@@ -33,6 +33,9 @@ data Album
   , title  :: Text
   , date   :: Date
   } deriving (Generic, Eq, Show)
+
+instance Ord Album where
+  compare (Album a1 _ d1) (Album a2 _ d2) = compare d2 d1 <> compare a1 a2
 
 instance ToJSON Album where
   toEncoding = genericToEncoding defaultOptions
@@ -136,13 +139,13 @@ getScore cursor = T.concat score
 
 toAlbumsAwaitingDate :: Text -> [Text] -> [Date -> Album]
 toAlbumsAwaitingDate splitter =
-  map (toAlbumAwaitingDate . map T.strip . T.splitOn splitter)
+  map (toAlbumAwaitingDate splitter . map T.strip . T.splitOn splitter)
 
-toAlbumAwaitingDate :: [Text] -> (Date -> Album)
-toAlbumAwaitingDate [a, t]    = Album a t
-toAlbumAwaitingDate [a]       = Album a ""
-toAlbumAwaitingDate [a,t1,t2] = Album a (t1 <> ": " <> t2)
-toAlbumAwaitingDate _         = error "Invalid pattern!"
+toAlbumAwaitingDate :: Text -> [Text] -> (Date -> Album)
+toAlbumAwaitingDate _ [a, t]    = Album a t
+toAlbumAwaitingDate _ [a]       = Album a ""
+toAlbumAwaitingDate splitter [a,t1,t2] = Album a (t1 <> splitter <> t2)
+toAlbumAwaitingDate _ _         = error "Invalid pattern!"
 
 toDate :: Text -> Date
 toDate d = case toUCTTime (T.unpack d) of
@@ -155,5 +158,9 @@ toUCTTime = parseTimeM True defaultTimeLocale "%a, %d %b %Y %X %z"
 main :: IO ()
 main = do
   -- get only for this month and sort by date, then title
-  albums <- nub . join <$> mapConcurrently id [getPitchforkAlbums, getStereogumAlbums, getMetacriticAlbums]
+  albums <- sort . nub . join <$>
+    mapConcurrently id [ getPitchforkAlbums
+                       , getStereogumAlbums
+                       , getMetacriticAlbums
+                       ]
   encodeFile "albums.json" albums
