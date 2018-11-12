@@ -1,11 +1,11 @@
-{-# LANGUAGE DeriveAnyClass #-}
 {-# LANGUAGE DeriveGeneric #-}
 {-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE RecordWildCards #-}
 module Main where
 
 import           Control.Monad ((>=>), join)
 import           Control.Concurrent.Async (mapConcurrently)
-import           Data.Aeson (ToJSON(..), encodeFile)
+import           Data.Aeson (ToJSON(..), encodeFile, (.=), object)
 import           Data.List (nub, sort)
 import           Data.Text (Text)
 import qualified Data.Text as T
@@ -21,12 +21,21 @@ import           Network.HTTP.Simple (Request
 import           Text.HTML.DOM
 import           Text.XML.Cursor
 
+-- add score to type as Maybe Double
 data Album
   = Album
   { artist :: Text
   , title  :: Text
   , date   :: Day
-  } deriving (Generic, ToJSON, Eq, Show)
+  } deriving (Generic, Eq, Show)
+
+-- instance will hide score
+instance ToJSON Album where
+  toJSON Album{..} = object
+    [ "artist" .= artist
+    , "title"  .= title
+    , "date"   .= date
+    ]
 
 instance Ord Album where
   compare (Album a1 _ d1) (Album a2 _ d2) = compare d2 d1 <> compare a1 a2
