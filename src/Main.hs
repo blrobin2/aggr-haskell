@@ -27,6 +27,9 @@ import           Network.HTTP.Simple ( Request
 import           Text.HTML.DOM
 import           Text.XML.Cursor
 
+type Year  = Integer
+type Month = Int
+
 data Album
   = Album
   { artist :: Text
@@ -45,16 +48,16 @@ instance ToJSON Album where
 instance Ord Album where
   compare (Album a1 _ d1 _) (Album a2 _ d2 _) = compare d2 d1 <> compare a1 a2
 
-getStereogumAlbums :: Int -> IO [Album]
+getStereogumAlbums :: Month -> IO [Album]
 getStereogumAlbums currentMonth = do
   cursor <- getXmlCursor "https://www.stereogum.com/heavy-rotation/feed/"
   let albumsAwaitingDate = toAlbumsAwaitingDate "–" $ getArtistsAndTitles cursor
   let dates = getReleaseDates cursor
   let albums = zipWith (\album date -> album date Nothing) albumsAwaitingDate dates
-  -- zero because we don't care about score
+  -- 0, because we don't care about score
   return $ filterAlbums 0 currentMonth albums
 
-getPitchforkAlbums :: Int -> IO [Album]
+getPitchforkAlbums :: Month -> IO [Album]
 getPitchforkAlbums currentMonth = do
   cursor <- getXmlCursor "https://pitchfork.com/rss/reviews/albums/"
   let albumsAwaitingDate = toAlbumsAwaitingDate ":" $ getArtistsAndTitles cursor
@@ -69,7 +72,7 @@ getPitchforkAlbums currentMonth = do
                   -> Album
     completeAlbum album = album
 
-getMetacriticAlbums :: Int -> Integer -> IO [Album]
+getMetacriticAlbums :: Month -> Year -> IO [Album]
 getMetacriticAlbums currentMonth currentYear = do
   cursor <- getXmlCursor "https://www.metacritic.com/browse/albums/release-date/new-releases/date"
   let albums = getAlbums cursor
@@ -96,6 +99,8 @@ getMetacriticAlbums currentMonth currentYear = do
         &/ element "div" >=> attributeIs "class" "basic_stat product_title"
         &/ element "a"
         &// content
+    -- Because we only get the month and day, the Day defaults to 1970
+    -- So we pass in the current year so we can set it for each date
     getDates cursor currentYear = map (setToCurrentYear currentYear . toDate)
         $ cursor $//
         element "li" >=> attributeIs "class" "product release_product"
@@ -110,7 +115,7 @@ getMetacriticAlbums currentMonth currentYear = do
     toDate d = case parseTimeM True defaultTimeLocale "%b %e" (T.unpack d) of
       Right d' -> d'
 
-    setToCurrentYear :: Integer -> Day -> Day
+    setToCurrentYear :: Year -> Day -> Day
     setToCurrentYear currentYear date = fromGregorian currentYear month day
       where (_, month, day) = toGregorian date
 
@@ -122,7 +127,7 @@ getMetacriticAlbums currentMonth currentYear = do
         &/ element "div"
         &// content
 
-filterAlbums :: Double -> Int -> [Album] -> [Album]
+filterAlbums :: Double -> Month -> [Album] -> [Album]
 filterAlbums lowestScore currentMonth = filter filterer
   where
     filterer :: Album -> Bool
@@ -136,13 +141,13 @@ filterAlbums lowestScore currentMonth = filter filterer
     cameOutThisMonth :: Album -> Bool
     cameOutThisMonth album = albumMonth album == currentMonth
 
-    albumMonth :: Album -> Int
+    albumMonth :: Album -> Month
     albumMonth = getMonthFromDate . toGregorian . date
 
-getCurrentDate :: IO (Integer, Int, Int)
+getCurrentDate :: IO (Year, Month, Int)
 getCurrentDate = toGregorian . utctDay <$> getCurrentTime
 
-getMonthFromDate :: (a, Int, b) -> Int
+getMonthFromDate :: (a, Month, b) -> Int
 getMonthFromDate (_, month, _) = month
 
 getXmlCursor :: Request -> IO Cursor
