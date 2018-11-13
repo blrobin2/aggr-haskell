@@ -9,11 +9,17 @@ import           Data.Aeson (ToJSON(..), encodeFile, (.=), object)
 import           Data.List (nub, sort, zipWith4)
 import           Data.Text (Text)
 import qualified Data.Text as T
-import           Data.Time (Day, parseTimeM)
+import           Data.Time ( Day
+                           , fromGregorian
+                           , getCurrentTime
+                           , parseTimeM
+                           , toGregorian
+                           , utctDay
+                           )
 import           Data.Time.Format (formatTime, defaultTimeLocale)
 import           GHC.Generics (Generic)
 import           Network.HTTP.Client (parseRequest)
-import           Network.HTTP.Simple (Request
+import           Network.HTTP.Simple ( Request
                                      , httpLBS
                                      , httpSink
                                      , getResponseBody
@@ -39,31 +45,43 @@ instance ToJSON Album where
 instance Ord Album where
   compare (Album a1 _ d1 _) (Album a2 _ d2 _) = compare d2 d1 <> compare a1 a2
 
-getStereogumAlbums :: IO [Album]
-getStereogumAlbums = do
+getStereogumAlbums :: Int -> IO [Album]
+getStereogumAlbums currentMonth = do
   cursor <- getXmlCursor "https://www.stereogum.com/heavy-rotation/feed/"
   let albumsAwaitingDate = toAlbumsAwaitingDate "–" $ getArtistsAndTitles cursor
   let dates = getReleaseDates cursor
-  return $ zipWith (\album date -> album date Nothing) albumsAwaitingDate dates
+  let albums = zipWith (\album date -> album date Nothing) albumsAwaitingDate dates
+  -- zero because we don't care about score
+  return $ filterAlbums 0 currentMonth albums
 
-getPitchforkAlbums :: IO [Album]
-getPitchforkAlbums = do
+getPitchforkAlbums :: Int -> IO [Album]
+getPitchforkAlbums currentMonth = do
   cursor <- getXmlCursor "https://pitchfork.com/rss/reviews/albums/"
   let albumsAwaitingDate = toAlbumsAwaitingDate ":" $ getArtistsAndTitles cursor
   let dates  = getReleaseDates cursor
   scores <- getReviewScores cursor
-  let albums = zipWith3 (\album date score -> album date score) albumsAwaitingDate dates scores
-
-  return $ filterAlbumsByScore 7.8 albums
-
-getMetacriticAlbums :: IO [Album]
-getMetacriticAlbums = do
-  cursor <- getXmlCursor "https://www.metacritic.com/browse/albums/release-date/new-releases/date"
-  --let scores = getScores cursor
-  let albums = getAlbums cursor
-  return $ filterAlbumsByScore 80 albums
+  let albums = zipWith3 completeAlbum albumsAwaitingDate dates scores
+  return $ filterAlbums 7.8 currentMonth albums
   where
-    getAlbums cursor = zipWith4 Album (getArtists cursor) (map T.strip $ getTitles cursor) (getDates cursor) (getScores cursor)
+    completeAlbum :: (Day -> Maybe Double -> Album)
+                  -> Day
+                  -> Maybe Double
+                  -> Album
+    completeAlbum album = album
+
+getMetacriticAlbums :: Int -> Integer -> IO [Album]
+getMetacriticAlbums currentMonth currentYear = do
+  cursor <- getXmlCursor "https://www.metacritic.com/browse/albums/release-date/new-releases/date"
+  let albums = getAlbums cursor
+  return $ filterAlbums 80 currentMonth albums
+  where
+    getAlbums :: Cursor -> [Album]
+    getAlbums cursor = zipWith4 Album
+      (getArtists cursor)
+      (map T.strip $ getTitles cursor)
+      (getDates cursor currentYear)
+      (getScores cursor)
+
     getArtists cursor = cursor $//
         element "li" >=> attributeIs "class" "product release_product"
         &/ element "div"
@@ -78,7 +96,8 @@ getMetacriticAlbums = do
         &/ element "div" >=> attributeIs "class" "basic_stat product_title"
         &/ element "a"
         &// content
-    getDates cursor = map toDate $ cursor $//
+    getDates cursor currentYear = map (setToCurrentYear currentYear . toDate)
+        $ cursor $//
         element "li" >=> attributeIs "class" "product release_product"
         &/ element "div"
         &/ element "div" >=> attributeIs "class" "basic_stat condensed_stats"
@@ -86,8 +105,15 @@ getMetacriticAlbums = do
         &/ element "li" >=> attributeIs "class" "stat release_date"
         &/ element "span" >=> attributeIs "class" "data"
         &// content
+
+    toDate :: Text -> Day
     toDate d = case parseTimeM True defaultTimeLocale "%b %e" (T.unpack d) of
       Right d' -> d'
+
+    setToCurrentYear :: Integer -> Day -> Day
+    setToCurrentYear currentYear date = fromGregorian currentYear month day
+      where (_, month, day) = toGregorian date
+
     getScores :: Cursor -> [Maybe Double]
     getScores cursor = map parseScore $ cursor $//
         element "li" >=> attributeIs "class" "product release_product"
@@ -96,15 +122,28 @@ getMetacriticAlbums = do
         &/ element "div"
         &// content
 
-filterAlbumsByScore :: Double -> [Album] -> [Album]
-filterAlbumsByScore lowestScore albums = filtered
+filterAlbums :: Double -> Int -> [Album] -> [Album]
+filterAlbums lowestScore currentMonth = filter filterer
   where
-    filtered :: [Album]
-    filtered = filter scoreIsHighEnough albums
+    filterer :: Album -> Bool
+    filterer = (&&) <$> cameOutThisMonth <*> scoreIsHighEnough
+
     scoreIsHighEnough :: Album -> Bool
     scoreIsHighEnough album = case score album of
       Nothing -> True
       Just s  -> s >= lowestScore
+
+    cameOutThisMonth :: Album -> Bool
+    cameOutThisMonth album = albumMonth album == currentMonth
+
+    albumMonth :: Album -> Int
+    albumMonth = getMonthFromDate . toGregorian . date
+
+getCurrentDate :: IO (Integer, Int, Int)
+getCurrentDate = toGregorian . utctDay <$> getCurrentTime
+
+getMonthFromDate :: (a, Int, b) -> Int
+getMonthFromDate (_, month, _) = month
 
 getXmlCursor :: Request -> IO Cursor
 getXmlCursor url = do
@@ -163,10 +202,10 @@ toDay = parseTimeM True defaultTimeLocale "%a, %d %b %Y %X %z"
 
 main :: IO ()
 main = do
-  -- get only for this month and sort by date, then title
+  (currentYear, currentMonth, _) <- getCurrentDate
   albums <- sort . nub . join <$>
-    mapConcurrently id [ getPitchforkAlbums
-                       , getStereogumAlbums
-                       , getMetacriticAlbums
+    mapConcurrently id [ getPitchforkAlbums  currentMonth
+                       , getStereogumAlbums  currentMonth
+                       , getMetacriticAlbums currentMonth currentYear
                        ]
   encodeFile "albums.json" albums
