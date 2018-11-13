@@ -37,7 +37,7 @@ getPitchforkAlbums :: Month -> IO [Album]
 getPitchforkAlbums currentMonth = do
   cursor <- getXmlCursor "https://pitchfork.com/rss/reviews/albums/"
   let partialAlbums = toPartialAlbums ":" $ getArtistsAndTitles cursor
-  let dates  = getReleaseDates cursor
+  let dates = getReleaseDates cursor
   scores <- getReviewScores cursor
   let albums = zipWith3 completeAlbum partialAlbums dates scores
   return $ filterAlbums 7.8 currentMonth albums
@@ -61,6 +61,7 @@ getMetacriticAlbums currentMonth currentYear = do
       (getDates cursor currentYear)
       (getScores cursor)
 
+    getArtists :: Cursor -> [Text]
     getArtists cursor = cursor $//
         element "li" >=> attributeIs "class" "product release_product"
         &/ element "div"
@@ -69,6 +70,8 @@ getMetacriticAlbums currentMonth currentYear = do
         &/ element "li" >=> attributeIs "class" "stat product_artist"
         &/ element "span" >=> attributeIs "class" "data"
         &// content
+
+    getTitles :: Cursor -> [Text]
     getTitles cursor = cursor $//
         element "li" >=> attributeIs "class" "product release_product"
         &/ element "div"
@@ -77,6 +80,7 @@ getMetacriticAlbums currentMonth currentYear = do
         &// content
     -- Because we only get the month and day, the Day defaults to 1970
     -- So we pass in the current year so we can set it for each date
+    getDates :: Cursor -> Year -> [Day]
     getDates cursor currentYear = map (setToCurrentYear currentYear . toDate monthDay)
         $ cursor $//
         element "li" >=> attributeIs "class" "product release_product"
