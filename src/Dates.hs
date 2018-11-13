@@ -43,9 +43,9 @@ setToCurrentYear currentYear date = fromGregorian currentYear month day
   where (_, month, day) = toGregorian date
 
 toDate :: DateFormat -> Text -> IO Day
-toDate dateFormat d = case toDay dateFormat (unpack d) of
-  Just d' -> return d'
-  Nothing -> utctDay <$> getCurrentTime
+toDate dateFormat date = case toDay dateFormat (unpack date) of
+  Just day -> pure day
+  Nothing  -> utctDay <$> getCurrentTime
 
 toDay :: DateFormat -> String -> Maybe Day
 toDay = parseTimeM True defaultTimeLocale

@@ -31,7 +31,7 @@ getStereogumAlbums currentMonth = do
   dates <- getReleaseDates cursor
   let albums = zipWith (\album date -> album date Nothing) partialAlbums dates
   -- 0, because we don't care about score
-  return $ filterAlbums 0 currentMonth albums
+  pure $ filterAlbums 0 currentMonth albums
 
 getPitchforkAlbums :: Month -> IO [Album]
 getPitchforkAlbums currentMonth = do
@@ -40,7 +40,7 @@ getPitchforkAlbums currentMonth = do
   dates  <- getReleaseDates cursor
   scores <- getReviewScores cursor
   let albums = zipWith3 completeAlbum partialAlbums dates scores
-  return $ filterAlbums 7.8 currentMonth albums
+  pure $ filterAlbums 7.8 currentMonth albums
   where
     completeAlbum :: (Day -> Maybe Double -> Album)
                   -> Day
@@ -56,7 +56,7 @@ getMetacriticAlbums currentMonth currentYear = do
   let scores  = getScores cursor
   dates <- map (setToCurrentYear currentYear) <$> getDates cursor currentYear
   let albums  = zipWith4 Album artists titles dates scores
-  return $ filterAlbums 80 currentMonth albums
+  pure $ filterAlbums 80 currentMonth albums
   where
     getArtists :: Cursor -> [Text]
     getArtists cursor = cursor $//
@@ -113,7 +113,7 @@ filterAlbums lowestScore currentMonth = filter filterer
 getXmlCursor :: Request -> IO Cursor
 getXmlCursor url = do
   doc <- httpSink url $ const sinkDoc
-  return $ fromDocument doc
+  pure $ fromDocument doc
 
 getArtistsAndTitles :: Cursor -> [Text]
 getArtistsAndTitles cursor =
