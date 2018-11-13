@@ -54,8 +54,10 @@ getMetacriticAlbums currentMonth currentYear = do
   let artists = getArtists cursor
   let titles  = getTitles cursor
   let scores  = getScores cursor
-  dates <- map (setToCurrentYear currentYear) <$> getDates cursor currentYear
-  let albums  = zipWith4 Album artists titles dates scores
+  -- Because we only get the month and day, the Day defaults to 1970
+  -- So we pass in the current year so we can set it for each date
+  dates <- map (setToCurrentYear currentYear) <$> getDates cursor
+  let albums = zipWith4 Album artists titles dates scores
   pure $ filterAlbums 80 currentMonth albums
   where
     getArtists :: Cursor -> [Text]
@@ -75,10 +77,8 @@ getMetacriticAlbums currentMonth currentYear = do
         &/ element "div" >=> attributeIs "class" "basic_stat product_title"
         &/ element "a"
         &// content
-    -- Because we only get the month and day, the Day defaults to 1970
-    -- So we pass in the current year so we can set it for each date
-    --getDates :: Cursor -> Year -> IO [Day]
-    getDates cursor currentYear = traverse (toDate monthDay)
+    getDates :: Cursor -> IO [Day]
+    getDates cursor = traverse (toDate monthDay)
         $ cursor $//
         element "li" >=> attributeIs "class" "product release_product"
         &/ element "div"
@@ -134,9 +134,8 @@ getReviewScores = mapConcurrently score . getReviewLinks
 -- the strings that start with "http". I hate it, but I haven't found
 -- an alternative...
 getReviewLinks :: Cursor -> [Text]
-getReviewLinks cursor = elems
-  --filter (T.isPrefixOf "http") elems
-  where elems = cursor $// element "item" &/ laxElement "link" &// content
+getReviewLinks cursor = filter (T.isPrefixOf "http") elems
+  where elems = cursor $// element "item" &// content
 
 getScore :: Cursor -> Text
 getScore cursor = T.concat score
@@ -145,7 +144,7 @@ getScore cursor = T.concat score
           &// content
 
 parseScore :: Text -> Maybe Double
-parseScore = Just . read . T.unpack
+parseScore = pure . read . T.unpack
 
 toPartialAlbums :: Text -> [Text] -> [Day -> Maybe Double -> Album]
 toPartialAlbums splitter =
