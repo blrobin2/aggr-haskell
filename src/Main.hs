@@ -6,7 +6,7 @@ module Main where
 import           Control.Monad ((>=>), join)
 import           Control.Concurrent.Async (mapConcurrently)
 import           Data.Aeson (ToJSON(..), encodeFile, (.=), object)
-import           Data.List (nub, sort)
+import           Data.List (nub, sort, zipWith4)
 import           Data.Text (Text)
 import qualified Data.Text as T
 import           Data.Time (Day, parseTimeM)
@@ -21,15 +21,14 @@ import           Network.HTTP.Simple (Request
 import           Text.HTML.DOM
 import           Text.XML.Cursor
 
--- add score to type as Maybe Double
 data Album
   = Album
   { artist :: Text
   , title  :: Text
   , date   :: Day
+  , score  :: Maybe Double
   } deriving (Generic, Eq, Show)
 
--- instance will hide score
 instance ToJSON Album where
   toJSON Album{..} = object
     [ "artist" .= artist
@@ -38,32 +37,33 @@ instance ToJSON Album where
     ]
 
 instance Ord Album where
-  compare (Album a1 _ d1) (Album a2 _ d2) = compare d2 d1 <> compare a1 a2
+  compare (Album a1 _ d1 _) (Album a2 _ d2 _) = compare d2 d1 <> compare a1 a2
 
 getStereogumAlbums :: IO [Album]
 getStereogumAlbums = do
   cursor <- getXmlCursor "https://www.stereogum.com/heavy-rotation/feed/"
   let albumsAwaitingDate = toAlbumsAwaitingDate "–" $ getArtistsAndTitles cursor
   let dates = getReleaseDates cursor
-  return $ zipWith (\album date -> album date) albumsAwaitingDate dates
+  return $ zipWith (\album date -> album date Nothing) albumsAwaitingDate dates
 
 getPitchforkAlbums :: IO [Album]
 getPitchforkAlbums = do
   cursor <- getXmlCursor "https://pitchfork.com/rss/reviews/albums/"
   let albumsAwaitingDate = toAlbumsAwaitingDate ":" $ getArtistsAndTitles cursor
   let dates  = getReleaseDates cursor
-  let albums = zipWith (\album date -> album date) albumsAwaitingDate dates
   scores <- getReviewScores cursor
-  return $ filterAlbumsByScore 7.8 scores albums
+  let albums = zipWith3 (\album date score -> album date score) albumsAwaitingDate dates scores
+
+  return $ filterAlbumsByScore 7.8 albums
 
 getMetacriticAlbums :: IO [Album]
 getMetacriticAlbums = do
   cursor <- getXmlCursor "https://www.metacritic.com/browse/albums/release-date/new-releases/date"
-  let scores = getScores cursor
+  --let scores = getScores cursor
   let albums = getAlbums cursor
-  return $ filterAlbumsByScore 80 scores albums
+  return $ filterAlbumsByScore 80 albums
   where
-    getAlbums cursor = zipWith3 Album (getArtists cursor) (map T.strip $ getTitles cursor) (getDates cursor)
+    getAlbums cursor = zipWith4 Album (getArtists cursor) (map T.strip $ getTitles cursor) (getDates cursor) (getScores cursor)
     getArtists cursor = cursor $//
         element "li" >=> attributeIs "class" "product release_product"
         &/ element "div"
@@ -88,24 +88,23 @@ getMetacriticAlbums = do
         &// content
     toDate d = case parseTimeM True defaultTimeLocale "%b %e" (T.unpack d) of
       Right d' -> d'
-    getScores cursor = cursor $//
+    getScores :: Cursor -> [Maybe Double]
+    getScores cursor = map parseScore $ cursor $//
         element "li" >=> attributeIs "class" "product release_product"
         &/ element "div"
         &/ element "div" >=> attributeIs "class" "basic_stat product_score brief_metascore"
         &/ element "div"
         &// content
 
-filterAlbumsByScore :: Double -> [Text] -> [Album] -> [Album]
-filterAlbumsByScore lowestScore scores albums = filtered
+filterAlbumsByScore :: Double -> [Album] -> [Album]
+filterAlbumsByScore lowestScore albums = filtered
   where
-    pairs :: [(Text, Album)]
-    pairs = zip scores albums
     filtered :: [Album]
-    filtered = map snd $ filter scoreIsHighEnough pairs
-    scoreIsHighEnough :: (Text, Album) -> Bool
-    scoreIsHighEnough (score, _) = readScore score >= lowestScore
-    readScore :: Text -> Double
-    readScore = read . T.unpack
+    filtered = filter scoreIsHighEnough albums
+    scoreIsHighEnough :: Album -> Bool
+    scoreIsHighEnough album = case score album of
+      Nothing -> True
+      Just s  -> s >= lowestScore
 
 getXmlCursor :: Request -> IO Cursor
 getXmlCursor url = do
@@ -120,11 +119,11 @@ getReleaseDates :: Cursor -> [Day]
 getReleaseDates cursor = map toDate dates
   where dates = cursor $// element "item" &/ element "pubDate" &// content
 
-getReviewScores :: Cursor -> IO [Text]
+getReviewScores :: Cursor -> IO [Maybe Double]
 getReviewScores = mapConcurrently score . getReviewLinks
   where
-    score :: Text -> IO Text
-    score link = getScore <$> (parseRequest (T.unpack link) >>= getXmlCursor)
+    score :: Text -> IO (Maybe Double)
+    score link = parseScore . getScore <$> (parseRequest (T.unpack link) >>= getXmlCursor)
 
 getReviewLinks :: Cursor -> [Text]
 getReviewLinks cursor = links
@@ -139,11 +138,14 @@ getScore cursor = T.concat score
     score =
       cursor $// element "span" >=> attributeIs "class" "score" &// content
 
-toAlbumsAwaitingDate :: Text -> [Text] -> [Day -> Album]
+parseScore :: Text -> Maybe Double
+parseScore = Just . read . T.unpack
+
+toAlbumsAwaitingDate :: Text -> [Text] -> [Day -> Maybe Double -> Album]
 toAlbumsAwaitingDate splitter =
   map (toAlbumAwaitingDate splitter . map T.strip . T.splitOn splitter)
 
-toAlbumAwaitingDate :: Text -> [Text] -> (Day -> Album)
+toAlbumAwaitingDate :: Text -> [Text] -> (Day -> Maybe Double -> Album)
 toAlbumAwaitingDate _ [a, t]    = Album a t
 toAlbumAwaitingDate _ [a]       = Album a ""
 toAlbumAwaitingDate splitter [a,t1,t2] = Album a (t1 <> splitter <> t2)
