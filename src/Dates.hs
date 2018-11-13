@@ -42,9 +42,10 @@ setToCurrentYear :: Year -> Day -> Day
 setToCurrentYear currentYear date = fromGregorian currentYear month day
   where (_, month, day) = toGregorian date
 
-toDate :: DateFormat -> Text -> Day
+toDate :: DateFormat -> Text -> IO Day
 toDate dateFormat d = case toDay dateFormat (unpack d) of
-  Just d' -> d'
+  Just d' -> return d'
+  Nothing -> utctDay <$> getCurrentTime
 
 toDay :: DateFormat -> String -> Maybe Day
 toDay = parseTimeM True defaultTimeLocale

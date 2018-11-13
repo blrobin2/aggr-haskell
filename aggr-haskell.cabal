@@ -17,6 +17,8 @@ executable aggr-haskell
   hs-source-dirs:      src
   main-is:             Main.hs
   default-language:    Haskell2010
+  other-modules:       Album
+                     , Dates
   build-depends:       base >= 4.7 && < 5
                      , aeson
                      , async
