@@ -11,6 +11,7 @@ import           Network.HTTP.Client (parseRequest)
 import           Network.HTTP.Simple (Request, httpSink)
 import           Text.HTML.DOM
 import           Text.XML.Cursor
+import           System.Environment (getArgs)
 
 import Album (Album(..))
 import Dates ( Year
@@ -156,12 +157,14 @@ toPartialAlbum _ [a]    = Album a ""
 toPartialAlbum splitter [a,t1,t2] = Album a (t1 <> splitter <> t2)
 toPartialAlbum _ _      = error "Invalid pattern!"
 
+-- Reader for passing in things like min score and URL as config ?
 main :: IO ()
 main = do
+  [fileName] <- getArgs
   (currentYear, currentMonth, _) <- getCurrentDate
   albums <- sort . nub . join <$>
     mapConcurrently id [ getPitchforkAlbums  currentMonth
                        , getStereogumAlbums  currentMonth
                        , getMetacriticAlbums currentMonth currentYear
                        ]
-  encodeFile "albums.json" albums
+  encodeFile fileName albums
