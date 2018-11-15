@@ -5,11 +5,13 @@ import           Control.Monad ((>=>), join)
 import           Control.Concurrent.Async (mapConcurrently)
 import           Data.Aeson (encodeFile)
 import           Data.List (intercalate, nub, sort, zipWith4)
+import           Data.Maybe (fromMaybe)
 import           Data.Text (Text)
 import qualified Data.Text as T
 import           Network.HTTP.Client (parseRequest)
 import           Network.HTTP.Simple (Request, httpSink)
 import           Text.HTML.DOM
+import           Text.Read (readMaybe)
 import           Text.XML.Cursor
 import           System.Environment (getArgs)
 
@@ -72,17 +74,17 @@ getPitchforkAlbums currentMonth = do
     completeAlbum album = album
 
     getScores :: Cursor -> IO [Maybe Double]
-    getScores = mapConcurrently score . getReviewLinks
+    getScores = mapConcurrently linkToScore . getReviewLinks
       where
-        -- for some reason, `element "link"` does not work, so we have to look for
-        -- the strings that start with "http". I hate it, but I haven't found
-        -- an alternative...
+        -- for some reason, `element "link"` does not work, so we have to look
+        -- for the strings that start with "http". I hate it, but I haven't
+        -- found an alternative...
         getReviewLinks :: Cursor -> [Text]
         getReviewLinks cursor = filter (T.isPrefixOf "http") elems
           where elems = cursor $// element "item" &// content
 
-        score :: Text -> IO (Maybe Double)
-        score link = parseScore . getScore
+        linkToScore :: Text -> IO (Maybe Double)
+        linkToScore link = parseScore . getScore
           <$> (parseRequest (T.unpack link) >>= getXmlCursor)
 
         getScore :: Cursor -> Text
@@ -95,8 +97,8 @@ getMetacriticAlbums :: Month -> Year -> IO [Album]
 getMetacriticAlbums currentMonth currentYear = do
   cursor <- getXmlCursor "https://www.metacritic.com/browse/albums/release-date/new-releases/date"
   let artists = getArtists cursor
-  let titles  = getTitles cursor
-  let scores  = getScores cursor
+  let titles  = getTitles  cursor
+  let scores  = getScores  cursor
   -- Because we only get the month and day, the Day defaults to 1970
   -- So we pass in the current year so we can set it for each date
   dates <- map (setToCurrentYear currentYear) <$> getDates cursor
@@ -153,10 +155,8 @@ getReleaseDates :: Cursor -> IO [Day]
 getReleaseDates cursor = traverse (toDate dateTimeZone) dates
   where dates = cursor $// element "item" &/ element "pubDate" &// content
 
+-- It may seem weird to fromMaybe only to put it back in a Maybe
+-- but if we get a malformed score, we'd rather err on the side
+-- of filtering it out than letting it pass
 parseScore :: Text -> Maybe Double
-parseScore s
-  -- We have multiple albums, and therefore a likely a reissue
-  -- so we'll just filter it out
-  | length stringScore > 3 = pure 0
-  | otherwise = pure $ read stringScore
-  where stringScore = T.unpack s
+parseScore score = pure $ fromMaybe 0 (readMaybe (T.unpack score))
