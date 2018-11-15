@@ -163,8 +163,7 @@ toPartialAlbum splitter [a,t1,t2] = Album a (t1 <> splitter <> t2)
 toPartialAlbum splitter xs = error $ errorString splitter xs
   where
     errorString :: Text -> [Text] -> String
-    errorString s xs = "Invalid pattern: "
-      <> intercalate (T.unpack s) (map T.unpack xs)
+    errorString s xs = T.unpack $ "Invalid pattern: " <> T.intercalate s xs
 
 getAlbums :: Month -> Year -> IO [Album]
 getAlbums currentMonth currentYear = sort . nub . join <$>
