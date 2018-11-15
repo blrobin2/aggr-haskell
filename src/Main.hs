@@ -58,7 +58,9 @@ getStereogumAlbums currentMonth = do
   -- 0, because we don't care about score
   pure $ filterAlbums 0 currentMonth albums
   where
-    completeAlbum :: (Day -> Maybe Double -> Album) -> Day -> Album
+    completeAlbum :: (Day -> Maybe Double -> Album)
+                  -> Day
+                  -> Album
     completeAlbum album date = album date Nothing
 
 getPitchforkAlbums :: Month -> IO [Album]
