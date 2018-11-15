@@ -32,7 +32,7 @@ dateTimeZone = "%a, %d %b %Y %X %z"
 getCurrentDate :: IO (Year, Month, Int)
 getCurrentDate = toGregorian . utctDay <$> getCurrentTime
 
-getMonthFromDate :: (a, Month, b) -> Int
+getMonthFromDate :: (a, Month, b) -> Month
 getMonthFromDate (_, month, _) = month
 
 getMonthFromDay :: Day -> Month

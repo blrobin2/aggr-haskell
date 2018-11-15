@@ -54,9 +54,12 @@ getStereogumAlbums currentMonth = do
   cursor <- getXmlCursor "https://www.stereogum.com/heavy-rotation/feed/"
   let partialAlbums = toPartialAlbums "–" $ getArtistsAndTitles cursor
   dates <- getReleaseDates cursor
-  let albums = zipWith (\album date -> album date Nothing) partialAlbums dates
+  let albums = zipWith completeAlbum partialAlbums dates
   -- 0, because we don't care about score
   pure $ filterAlbums 0 currentMonth albums
+  where
+    completeAlbum :: (Day -> Maybe Double -> Album) -> Day -> Album
+    completeAlbum album date = album date Nothing
 
 getPitchforkAlbums :: Month -> IO [Album]
 getPitchforkAlbums currentMonth = do
@@ -85,7 +88,7 @@ getPitchforkAlbums currentMonth = do
 
         linkToScore :: Text -> IO (Maybe Double)
         linkToScore link = parseScore . getScore
-          <$> (parseRequest (T.unpack link) >>= getXmlCursor)
+          <$> (getXmlCursor =<< parseRequest (T.unpack link))
 
         getScore :: Cursor -> Text
         getScore cursor = T.concat score
@@ -143,9 +146,7 @@ getMetacriticAlbums currentMonth currentYear = do
         &// content
 
 getXmlCursor :: Request -> IO Cursor
-getXmlCursor url = do
-  doc <- httpSink url $ const sinkDoc
-  pure $ fromDocument doc
+getXmlCursor url = fromDocument <$> httpSink url (const sinkDoc)
 
 getArtistsAndTitles :: Cursor -> [Text]
 getArtistsAndTitles cursor =
@@ -159,4 +160,4 @@ getReleaseDates cursor = traverse (toDate dateTimeZone) dates
 -- but if we get a malformed score, we'd rather err on the side
 -- of filtering it out than letting it pass
 parseScore :: Text -> Maybe Double
-parseScore score = pure $ fromMaybe 0 (readMaybe (T.unpack score))
+parseScore = pure . fromMaybe 0 . readMaybe . T.unpack
