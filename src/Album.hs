@@ -1,14 +1,13 @@
-{-# LANGUAGE DeriveGeneric #-}
+{-# LANGUAGE DeriveGeneric     #-}
 {-# LANGUAGE OverloadedStrings #-}
-{-# LANGUAGE RecordWildCards #-}
+{-# LANGUAGE RecordWildCards   #-}
 module Album ( Album(..)
              , filterAlbums
              , toPartialAlbums
              ) where
 
 import Data.Aeson (ToJSON(..), (.=), object)
-import Data.Text (Text)
-import qualified Data.Text as T
+import Data.Text (Text, intercalate, splitOn, strip, unpack)
 import Dates (Month, Day, getMonthFromDay)
 import GHC.Generics (Generic)
 
@@ -46,7 +45,7 @@ filterAlbums lowestScore currentMonth = filter filterer
 
 toPartialAlbums :: Text -> [Text] -> [Day -> Maybe Double -> Album]
 toPartialAlbums splitter =
-  map (toPartialAlbum splitter . map T.strip . T.splitOn splitter)
+  map (toPartialAlbum splitter . map strip . splitOn splitter)
 
 toPartialAlbum :: Text -> [Text] -> (Day -> Maybe Double -> Album)
 toPartialAlbum _ [a, t] = Album a t
@@ -55,4 +54,4 @@ toPartialAlbum splitter [a,t1,t2] = Album a (t1 <> splitter <> t2)
 toPartialAlbum splitter xs = error $ errorString splitter xs
   where
     errorString :: Text -> [Text] -> String
-    errorString s xs = T.unpack $ "Invalid pattern: " <> T.intercalate s xs
+    errorString s xs = unpack $ "Invalid pattern: " <> intercalate s xs
