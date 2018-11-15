@@ -4,7 +4,7 @@ module Main where
 import           Control.Monad ((>=>), join)
 import           Control.Concurrent.Async (mapConcurrently)
 import           Data.Aeson (encodeFile)
-import           Data.List (nub, sort, zipWith4)
+import           Data.List (intercalate, nub, sort, zipWith4)
 import           Data.Text (Text)
 import qualified Data.Text as T
 import           Network.HTTP.Client (parseRequest)
@@ -160,7 +160,11 @@ toPartialAlbum :: Text -> [Text] -> (Day -> Maybe Double -> Album)
 toPartialAlbum _ [a, t] = Album a t
 toPartialAlbum _ [a]    = Album a ""
 toPartialAlbum splitter [a,t1,t2] = Album a (t1 <> splitter <> t2)
-toPartialAlbum _ _      = error "Invalid pattern!"
+toPartialAlbum splitter xs = error $ errorString splitter xs
+  where
+    errorString :: Text -> [Text] -> String
+    errorString s xs = "Invalid pattern: "
+      <> intercalate (T.unpack s) (map T.unpack xs)
 
 getAlbums :: Month -> Year -> IO [Album]
 getAlbums currentMonth currentYear = sort . nub . join <$>
