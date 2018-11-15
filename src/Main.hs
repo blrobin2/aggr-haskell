@@ -145,7 +145,12 @@ getScore cursor = T.concat score
           &// content
 
 parseScore :: Text -> Maybe Double
-parseScore = pure . read . T.unpack
+parseScore s
+  -- We have multiple albums, and therefore a likely a reissue
+  -- so we'll just filter it out
+  | length stringScore > 3 = pure 0
+  | otherwise = pure $ read stringScore
+  where stringScore = T.unpack s
 
 toPartialAlbums :: Text -> [Text] -> [Day -> Maybe Double -> Album]
 toPartialAlbums splitter =
@@ -157,14 +162,22 @@ toPartialAlbum _ [a]    = Album a ""
 toPartialAlbum splitter [a,t1,t2] = Album a (t1 <> splitter <> t2)
 toPartialAlbum _ _      = error "Invalid pattern!"
 
--- Reader for passing in things like min score and URL as config ?
+getAlbums :: Month -> Year -> IO [Album]
+getAlbums currentMonth currentYear = sort . nub . join <$>
+  mapConcurrently id [ getPitchforkAlbums  currentMonth
+                     , getStereogumAlbums  currentMonth
+                     , getMetacriticAlbums currentMonth currentYear
+                     ]
+
+writeAlbumJSON :: FilePath -> IO ()
+writeAlbumJSON fileName = do
+  (currentYear, currentMonth, _) <- getCurrentDate
+  albums <- getAlbums currentMonth currentYear
+  encodeFile fileName albums
+
 main :: IO ()
 main = do
-  [fileName] <- getArgs
-  (currentYear, currentMonth, _) <- getCurrentDate
-  albums <- sort . nub . join <$>
-    mapConcurrently id [ getPitchforkAlbums  currentMonth
-                       , getStereogumAlbums  currentMonth
-                       , getMetacriticAlbums currentMonth currentYear
-                       ]
-  encodeFile fileName albums
+  args <- getArgs
+  if null args
+    then error "Missing file name!"
+    else writeAlbumJSON $ head args
