@@ -13,17 +13,39 @@ import           Text.HTML.DOM
 import           Text.XML.Cursor
 import           System.Environment (getArgs)
 
-import Album (Album(..))
+import Album ( Album(..)
+             , filterAlbums
+             , toPartialAlbums
+             )
 import Dates ( Year
              , Month
              , Day
              , dateTimeZone
              , getCurrentDate
-             , getMonthFromDay
              , monthDay
              , setToCurrentYear
              , toDate
              )
+
+main :: IO ()
+main = do
+  args <- getArgs
+  if null args
+    then error "Missing file name!"
+    else writeAlbumJSON $ head args
+
+writeAlbumJSON :: FilePath -> IO ()
+writeAlbumJSON fileName = do
+  (currentYear, currentMonth, _) <- getCurrentDate
+  albums <- getAlbums currentMonth currentYear
+  encodeFile fileName albums
+
+getAlbums :: Month -> Year -> IO [Album]
+getAlbums currentMonth currentYear = sort . nub . join <$>
+  mapConcurrently id [ getPitchforkAlbums  currentMonth
+                     , getStereogumAlbums  currentMonth
+                     , getMetacriticAlbums currentMonth currentYear
+                     ]
 
 getStereogumAlbums :: Month -> IO [Album]
 getStereogumAlbums currentMonth = do
@@ -39,7 +61,7 @@ getPitchforkAlbums currentMonth = do
   cursor <- getXmlCursor "https://pitchfork.com/rss/reviews/albums/"
   let partialAlbums = toPartialAlbums ":" $ getArtistsAndTitles cursor
   dates  <- getReleaseDates cursor
-  scores <- getReviewScores cursor
+  scores <- getScores cursor
   let albums = zipWith3 completeAlbum partialAlbums dates scores
   pure $ filterAlbums 7.8 currentMonth albums
   where
@@ -48,6 +70,26 @@ getPitchforkAlbums currentMonth = do
                   -> Maybe Double
                   -> Album
     completeAlbum album = album
+
+    getScores :: Cursor -> IO [Maybe Double]
+    getScores = mapConcurrently score . getReviewLinks
+      where
+        -- for some reason, `element "link"` does not work, so we have to look for
+        -- the strings that start with "http". I hate it, but I haven't found
+        -- an alternative...
+        getReviewLinks :: Cursor -> [Text]
+        getReviewLinks cursor = filter (T.isPrefixOf "http") elems
+          where elems = cursor $// element "item" &// content
+
+        score :: Text -> IO (Maybe Double)
+        score link = parseScore . getScore
+          <$> (parseRequest (T.unpack link) >>= getXmlCursor)
+
+        getScore :: Cursor -> Text
+        getScore cursor = T.concat score
+          where score = cursor
+                  $// element "span" >=> attributeIs "class" "score"
+                  &// content
 
 getMetacriticAlbums :: Month -> Year -> IO [Album]
 getMetacriticAlbums currentMonth currentYear = do
@@ -78,6 +120,7 @@ getMetacriticAlbums currentMonth currentYear = do
         &/ element "div" >=> attributeIs "class" "basic_stat product_title"
         &/ element "a"
         &// content
+
     getDates :: Cursor -> IO [Day]
     getDates cursor = traverse (toDate monthDay)
         $ cursor $//
@@ -97,20 +140,6 @@ getMetacriticAlbums currentMonth currentYear = do
         &/ element "div"
         &// content
 
-filterAlbums :: Double -> Month -> [Album] -> [Album]
-filterAlbums lowestScore currentMonth = filter filterer
-  where
-    filterer :: Album -> Bool
-    filterer = (&&) <$> cameOutThisMonth <*> scoreIsHighEnough
-
-    scoreIsHighEnough :: Album -> Bool
-    scoreIsHighEnough album = case score album of
-      Nothing -> True
-      Just s  -> s >= lowestScore
-
-    cameOutThisMonth :: Album -> Bool
-    cameOutThisMonth album = (getMonthFromDay . date $ album) == currentMonth
-
 getXmlCursor :: Request -> IO Cursor
 getXmlCursor url = do
   doc <- httpSink url $ const sinkDoc
@@ -124,26 +153,6 @@ getReleaseDates :: Cursor -> IO [Day]
 getReleaseDates cursor = traverse (toDate dateTimeZone) dates
   where dates = cursor $// element "item" &/ element "pubDate" &// content
 
-getReviewScores :: Cursor -> IO [Maybe Double]
-getReviewScores = mapConcurrently score . getReviewLinks
-  where
-    score :: Text -> IO (Maybe Double)
-    score link = parseScore . getScore
-      <$> (parseRequest (T.unpack link) >>= getXmlCursor)
-
--- for some reason, `element "link"` does not work, so we have to look for
--- the strings that start with "http". I hate it, but I haven't found
--- an alternative...
-getReviewLinks :: Cursor -> [Text]
-getReviewLinks cursor = filter (T.isPrefixOf "http") elems
-  where elems = cursor $// element "item" &// content
-
-getScore :: Cursor -> Text
-getScore cursor = T.concat score
-  where score = cursor
-          $// element "span" >=> attributeIs "class" "score"
-          &// content
-
 parseScore :: Text -> Maybe Double
 parseScore s
   -- We have multiple albums, and therefore a likely a reissue
@@ -151,36 +160,3 @@ parseScore s
   | length stringScore > 3 = pure 0
   | otherwise = pure $ read stringScore
   where stringScore = T.unpack s
-
-toPartialAlbums :: Text -> [Text] -> [Day -> Maybe Double -> Album]
-toPartialAlbums splitter =
-  map (toPartialAlbum splitter . map T.strip . T.splitOn splitter)
-
-toPartialAlbum :: Text -> [Text] -> (Day -> Maybe Double -> Album)
-toPartialAlbum _ [a, t] = Album a t
-toPartialAlbum _ [a]    = Album a ""
-toPartialAlbum splitter [a,t1,t2] = Album a (t1 <> splitter <> t2)
-toPartialAlbum splitter xs = error $ errorString splitter xs
-  where
-    errorString :: Text -> [Text] -> String
-    errorString s xs = T.unpack $ "Invalid pattern: " <> T.intercalate s xs
-
-getAlbums :: Month -> Year -> IO [Album]
-getAlbums currentMonth currentYear = sort . nub . join <$>
-  mapConcurrently id [ getPitchforkAlbums  currentMonth
-                     , getStereogumAlbums  currentMonth
-                     , getMetacriticAlbums currentMonth currentYear
-                     ]
-
-writeAlbumJSON :: FilePath -> IO ()
-writeAlbumJSON fileName = do
-  (currentYear, currentMonth, _) <- getCurrentDate
-  albums <- getAlbums currentMonth currentYear
-  encodeFile fileName albums
-
-main :: IO ()
-main = do
-  args <- getArgs
-  if null args
-    then error "Missing file name!"
-    else writeAlbumJSON $ head args
