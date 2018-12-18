@@ -89,8 +89,7 @@ getPitchforkAlbums currentMonth = do
           where elems = cursor $// element "item" &// content
 
         linkToScore :: Text -> IO (Maybe Double)
-        linkToScore link = parseScore . getScore
-          <$> (getXmlCursor =<< parseRequest (T.unpack link))
+        linkToScore link = parseScore . getScore <$> (getXmlCursor =<< parseRequest (T.unpack link))
 
         getScore :: Cursor -> Text
         getScore cursor = T.concat score

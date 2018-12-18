@@ -6,6 +6,7 @@ module Album ( Album(..)
              , toPartialAlbums
              ) where
 
+import Control.Applicative (liftA2)
 import Data.Aeson (ToJSON(..), (.=), object)
 import Data.Text (Text, intercalate, splitOn, strip, unpack)
 import Dates (Month, Day, getMonthFromDay)
@@ -33,7 +34,7 @@ filterAlbums :: Double -> Month -> [Album] -> [Album]
 filterAlbums lowestScore currentMonth = filter filterer
   where
     filterer :: Album -> Bool
-    filterer = (&&) <$> cameOutThisMonth <*> scoreIsHighEnough
+    filterer = liftA2 (&&) cameOutThisMonth scoreIsHighEnough
 
     scoreIsHighEnough :: Album -> Bool
     scoreIsHighEnough album = case score album of
